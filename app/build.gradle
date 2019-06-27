@@ -1,19 +1,38 @@
 apply plugin: 'com.android.application'
-apply plugin: 'org.greenrobot.greendao'
+def fabricKey = null
+if (project.rootProject.file('local.properties').exists()) {
+    Properties properties = new Properties()
+    properties.load(project.rootProject.file('local.properties').newDataInputStream())
+    fabricKey = properties.getProperty('FABRIC_KEY')
+}
+if (fabricKey == null) {
+    fabricKey = System.getenv("FABRIC_KEY")
+}
+
+if (fabricKey != null) {
+    apply from: '../fabric.gradle'
+}
 
 android {
-    compileSdkVersion rootProject.ext.targetSdkVersion
+    compileSdkVersion rootProject.ext.compileSdkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
     defaultConfig {
-        applicationId "com.xiaomi.xmsf"
+        applicationId "top.trumeet.mipush"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        // XMPush sdk requires XMPushService not exported, but sdk will start exported XMPushService after
-        // XMSF version code 106. SDK will also check version code must >= 105.
         versionCode rootProject.ext.versionCode
         versionName rootProject.ext.versionName
         testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
-        resConfigs "zh"
+        resConfigs "zh", "en"
+        ndk {
+            abiFilters 'armeabi', 'armeabi-v7a', 'x86'
+        }
+
+        manifestPlaceholders = [fabricKey: fabricKey == null ?
+                "" : fabricKey]
+        buildConfigField "String", "FABRIC_KEY", "\"" + fabricKey + "\""
+        buildConfigField "String", "GIT_TAG", "\"" + rootProject.ext.gitTag + "\""
+        // buildConfigField "boolean", "SNAPSHOT", "\"" + rootProject.ext.snapshot + "\""
     }
     buildTypes {
         debug {
@@ -21,29 +40,33 @@ android {
         }
         release {
             signingConfig signingConfigs.debug
-            minifyEnabled true
-            shrinkResources true
+            minifyEnabled false
+            //shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
-    greendao{
-        schemaVersion 4
-        daoPackage 'top.trumeet.mipushframework.db'
-        targetGenDir 'src/main/java'
-    }
     signingConfigs {
         debug {
-            try {
+            def locale = null
+            def keystorePwd = null
+            def alias = null
+            def pwd = null
+            if (project.rootProject.file('local.properties').exists()) {
                 Properties properties = new Properties()
                 properties.load(project.rootProject.file('local.properties').newDataInputStream())
-                storeFile file(properties.getProperty('KEY_LOCATE'))
-                storePassword properties.getProperty('KEYSTORE_PASSWORD')
-                keyAlias properties.getProperty('KEYSTORE_ALIAS')
-                keyPassword properties.getProperty('KEY_PASSWORD')
+                locale = properties.getProperty("KEY_LOCATE")
+                keystorePwd = properties.getProperty("KEYSTORE_PASSWORD")
+                alias = properties.getProperty("KEYSTORE_ALIAS")
+                pwd = properties.getProperty("KEY_PASSWORD")
             }
-            catch (ignored) {
-                throw new InvalidUserDataException("You should define KEYSTORE_PASSWORD and KEY_PASSWORD in local.properties.")
-            }
+
+            storeFile file(locale != null ? locale : project.rootProject.file(".yuuta.jks"))
+            storePassword keystorePwd != null ?
+                    keystorePwd : System.getenv("KEYSTORE_PASS")
+            keyAlias alias != null ?
+                    alias : System.getenv("ALIAS_NAME")
+            keyPassword pwd != null ?
+                    pwd : System.getenv("ALIAS_PASS")
         }
         release {
             // 满足下面两个条件时需要此配置
@@ -53,16 +76,25 @@ android {
             v2SigningEnabled false
         }
     }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+android.applicationVariants.all { variant ->
+    String taskName = String.format("remove%sStubClasses", variant.name.capitalize())
+    task "${taskName}" {
+        doLast { delete "${buildDir}/intermediates/classes/${variant.name}" + "/android" }
+    }
+    variant.processJavaResources.dependsOn(taskName)
 }
 
 dependencies {
-    compile fileTree(include: ['*.jar'], dir: 'libs')
-    compile('com.github.AndroidSnippet:SetupWizardLibCompat:0.3', {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation('com.github.AndroidSnippet:SetupWizardLibCompat:0.3', {
         exclude group: 'com.android.support'
     })
-    // GreenDao
-    implementation 'org.greenrobot:greendao:3.2.2'
-    compile 'com.github.yuweiguocn:GreenDaoUpgradeHelper:v2.0.0'
     // Recycler
     implementation('me.drakeet.multitype:multitype:3.3.0', {
         exclude group: 'com.android.support'
@@ -70,20 +102,37 @@ dependencies {
     // Support
     implementation "com.android.support:recyclerview-v7:$supportLibraryVersion"
     implementation "com.android.support:appcompat-v7:$supportLibraryVersion"
-    // 保♂险♂套
-    compile project(':condom')
     // Preference
-    implementation 'moe.shizuku.preference:preference:2.0.2'
-    implementation 'moe.shizuku.preference:preference-switchcompat:2.0.2'
-    implementation 'moe.shizuku.preference:preference-dialog-android:2.0.2'
-    implementation 'moe.shizuku.preference:preference-simplemenu:2.0.2'
-    // Log
-    compile 'org.slf4j:slf4j-api:1.7.21'
-    compile 'com.github.tony19:logback-android-core:1.1.1-6'
-    compile('com.github.tony19:logback-android-classic:1.1.1-6') {
-        // workaround issue #73
-        exclude group: 'com.google.android', module: 'android'
+    implementation 'moe.shizuku.preference:preference:2.2.3'
+    implementation 'moe.shizuku.preference:preference-switchcompat:2.2.3'
+    implementation 'moe.shizuku.preference:preference-dialog-android:2.2.3'
+    implementation 'moe.shizuku.preference:preference-simplemenu:2.2.3'
+    // Common
+    implementation project(':common')
+    // Fabric
+    implementation('com.crashlytics.sdk.android:crashlytics:2.8.0@aar') {
+        transitive = true
     }
-    // Markdown
-    compile 'com.zzhoujay.richtext:richtext:2.5.4'
+    // Help
+    implementation('moe.shizuku.support:helplib:1.1.0', {
+        exclude group: 'moe.shizuku.preference'
+        exclude group: 'com.android.support'
+    })
+    // RxJava & RxAndroid
+    implementation ("io.reactivex.rxjava2:rxandroid:$rxAndroidVersion", {
+        exclude group: 'com.android.support'
+    })
+    implementation ("io.reactivex.rxjava2:rxjava:$rxVersion", {
+        exclude group: 'com.android.support'
+    })
+    // RxActivityResult
+    implementation ('com.github.VictorAlbertos:RxActivityResult:0.4.5-2.x', {
+        exclude group: 'com.android.support'
+    })
+    // RxPermissions
+    implementation ('com.github.tbruyelle:rxpermissions:0.10.2', {
+        exclude group: 'com.android.support'
+    })
+    // Work
+    implementation "android.arch.work:work-runtime:$work_version"
 }

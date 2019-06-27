@@ -1,0 +1,126 @@
+apply plugin: 'com.android.application'
+def fabricKey = null
+if (project.rootProject.file('local.properties').exists()) {
+    Properties properties = new Properties()
+    properties.load(project.rootProject.file('local.properties').newDataInputStream())
+    fabricKey = properties.getProperty('FABRIC_KEY')
+}
+if (fabricKey == null) {
+    fabricKey = System.getenv("FABRIC_KEY")
+}
+
+if (fabricKey != null) {
+    apply from: '../fabric.gradle'
+}
+
+repositories {
+    maven { url 'https://dl.bintray.com/heruoxin/icebox' }
+}
+
+
+android {
+    compileSdkVersion rootProject.ext.compileSdkVersion
+    buildToolsVersion rootProject.ext.buildToolsVersion
+
+    defaultConfig {
+        applicationId "com.xiaomi.xmsf"
+        minSdkVersion rootProject.ext.minSdkVersion
+        // Keep alive
+        targetSdkVersion 23
+        // XMPush sdk requires XMPushService not exported, but sdk will start exported XMPushService after
+        // XMSF version code 106. SDK will also check version code must >= 105.
+        versionCode 105
+        versionName rootProject.ext.versionName + "_framework"
+
+        testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
+
+        manifestPlaceholders = [fabricKey: fabricKey == null ?
+        "" : fabricKey]
+        buildConfigField "String", "FABRIC_KEY", "\"" + fabricKey + "\""
+
+        ndk {
+            abiFilters 'armeabi', 'armeabi-v7a', 'x86'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
+        release {
+            signingConfig signingConfigs.debug
+            minifyEnabled false
+            //shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    signingConfigs {
+        debug {
+            def locale = null
+            def keystorePwd = null
+            def alias = null
+            def pwd = null
+            if (project.rootProject.file('local.properties').exists()) {
+                Properties properties = new Properties()
+                properties.load(project.rootProject.file('local.properties').newDataInputStream())
+                locale = properties.getProperty("KEY_LOCATE")
+                keystorePwd = properties.getProperty("KEYSTORE_PASSWORD")
+                alias = properties.getProperty("KEYSTORE_ALIAS")
+                pwd = properties.getProperty("KEY_PASSWORD")
+            }
+
+            storeFile file(locale != null ? locale : project.rootProject.file(".yuuta.jks"))
+            storePassword keystorePwd != null ?
+                    keystorePwd : System.getenv("KEYSTORE_PASS")
+            keyAlias alias != null ?
+                    alias : System.getenv("ALIAS_NAME")
+            keyPassword pwd != null ?
+                    pwd : System.getenv("ALIAS_PASS")
+        }
+        release {
+            // 满足下面两个条件时需要此配置
+            // 1. Gradle版本 >= 2.14.1
+            // 2. Android Gradle Plugin 版本 >= 2.2.0
+            // 作用是只使用旧版签名，禁用V2版签名模式
+            v2SigningEnabled false
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    lintOptions {
+        checkReleaseBuilds false
+        // Or, if you prefer, you can continue to check for errors in release builds,
+        // but continue the build even when errors are found:
+        abortOnError false
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    // Log
+    implementation('com.elvishew:xlog:1.6.1', {
+        exclude group: 'com.android.support'
+    })
+    // Hook
+    implementation 'me.weishu:epic:0.3.6'
+    testImplementation 'junit:junit:4.12'
+    androidTestImplementation 'com.android.support.test:runner:1.0.1'
+    androidTestImplementation 'com.android.support.test.espresso:espresso-core:3.0.1'
+    implementation project(':common')
+    implementation project(':condom')
+    implementation "com.android.support:support-v4:$supportLibraryVersion"
+    implementation project(':provider')
+    implementation project(':extenders')
+    implementation "com.android.support:palette-v7:$supportLibraryVersion"
+    compileOnly 'de.robv.android.xposed:api:82'
+
+    implementation 'com.catchingnow.icebox:SDK:1.0.5'
+
+    // Fabric
+    implementation('com.crashlytics.sdk.android:crashlytics:2.8.0@aar') {
+        transitive = true
+    }
+}

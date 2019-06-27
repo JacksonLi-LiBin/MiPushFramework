@@ -1,40 +1,38 @@
 package top.trumeet.mipushframework.utils;
 
 import android.content.Context;
-import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.graphics.drawable.Drawable;
 import android.os.AsyncTask;
 import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
 import android.support.v4.content.ContextCompat;
-import android.support.v4.util.LruCache;
 import android.support.v7.widget.RecyclerView;
+import android.text.TextUtils;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.TextView;
 
-import com.xiaomi.xmsf.R;
-
 import me.drakeet.multitype.ItemViewBinder;
+import top.trumeet.common.cache.ApplicationNameCache;
+import top.trumeet.common.cache.IconCache;
+import top.trumeet.mipush.R;
 
 /**
  * Created by Trumeet on 2017/8/26.
  * Base application list recycler binder with async load icon
- * @author Trumeet 
+ *
+ * @author Trumeet
  */
 
 public abstract class BaseAppsBinder<T> extends ItemViewBinder<T, BaseAppsBinder.ViewHolder> {
 
-    private LruCache<String, Drawable> mIconMemoryCaches;
+    private static final boolean DEBUG_ICON = false;
 
-    public BaseAppsBinder () {
+    public BaseAppsBinder() {
         super();
-        int maxMemory = (int) Runtime.getRuntime().maxMemory();
-        int cacheSizes = maxMemory/5;
-
-        mIconMemoryCaches = new LruCache<>(cacheSizes);
     }
 
     @NonNull
@@ -44,80 +42,75 @@ public abstract class BaseAppsBinder<T> extends ItemViewBinder<T, BaseAppsBinder
                 false));
     }
 
+    public final void fillData(String pkgName, boolean fillName, ViewHolder holder) {
+        Context context = holder.itemView.getContext();
+        if (fillName) {
+            CharSequence appName = ApplicationNameCache.getInstance().getAppName(context, pkgName);
+            if (appName == null) {
+                appName = pkgName;
+            }
+            holder.title.setText(appName);
+        }
+
+        IconCache cache = IconCache.getInstance();
+
+        if (DEBUG_ICON) {
+            Bitmap rawIconBitmap = cache.getRawIconBitmap(context, pkgName);
+            Bitmap icon = new IconCache.WhiteIconProcess().convert(context, rawIconBitmap);
+            holder.icon.setImageBitmap(icon);
+            holder.icon.setBackgroundColor(Color.BLACK);
+            return;
+        }
+
+        Bitmap icon = cache.getRawIconBitmapWithoutLoader(context, pkgName);
+        if (icon != null) {
+            holder.icon.setImageBitmap(icon);
+        } else {
+            new IconWorkerTask(holder.icon).execute(pkgName);
+        }
+    }
+
     /**
      * Should use in {@link ItemViewBinder#onBindViewHolder(RecyclerView.ViewHolder, Object)}.
      * Load app title and icon
+     *
      * @param pkgName Package name
-     * @param holder View holder
+     * @param holder  View holder
+     * @deprecated Use #fillData(String, boolean, ViewHolder) instead
      */
-    public final void fillData (String pkgName, ViewHolder holder) {
-        PackageManager packageManager = holder.itemView.getContext().
-                getPackageManager();
-        try {
-            holder.title.setText(packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkgName,
-                    0)));
-        } catch (PackageManager.NameNotFoundException e) {
-            e.printStackTrace();
-            holder.title.setText(pkgName);
-        }
-        Drawable icon = getIconFromMemoryCache(pkgName);
-        if (icon != null) {
-            holder.icon.setImageDrawable(icon);
-        } else {
-            new IconWorkerTask(holder.icon)
-                    .execute(pkgName);
-        }
+    @Deprecated
+    public final void fillData(String pkgName, ViewHolder holder) {
+        fillData(pkgName, true, holder);
     }
 
-    private void addDrawableToMemoryCache (@Nullable String pkg, @NonNull Drawable icon) {
-        if (getIconFromMemoryCache(pkg) == null) {
-            if (pkg == null) pkg = "";
-            mIconMemoryCaches.put(pkg, icon);
-        }
-    }
-
-    private Drawable getIconFromMemoryCache (@Nullable String pkg) {
-        if (pkg == null) pkg = "";
-        return mIconMemoryCaches.get(pkg);
-    }
-
-    private class IconWorkerTask extends AsyncTask<String, Void, Drawable> {
+    private class IconWorkerTask extends AsyncTask<String, Void, Bitmap> {
         private Context context;
 
         private ImageView imageView;
-        IconWorkerTask (ImageView imageView) {
+
+        IconWorkerTask(ImageView imageView) {
             this.imageView = imageView;
             this.context = imageView.getContext();
         }
 
         @Override
-        protected Drawable doInBackground(String... params) {
+        protected Bitmap doInBackground(String... params) {
             String pkg = params[0];
-            Drawable icon;
-            if (pkg == null || pkg.equals("")) {
-                pkg = "";
-                icon = ContextCompat.getDrawable(context,
-                        android.R.mipmap.sym_def_app_icon);
-            } else {
-                try {
-                    icon = context.getPackageManager()
-                            .getApplicationIcon(pkg);
-                } catch (PackageManager.NameNotFoundException ignore) {
-                    icon = ContextCompat.getDrawable(context,
-                            android.R.mipmap.sym_def_app_icon);
-                }
+            Bitmap icon = null;
+            if (!TextUtils.isEmpty(pkg)) {
+                icon = IconCache.getInstance().getRawIconBitmap(context, pkg);
             }
             if (icon == null) {
-                return null;
+                Drawable drawable = ContextCompat.getDrawable(context, android.R.mipmap.sym_def_app_icon);
+
             }
-            addDrawableToMemoryCache(pkg, icon);
             return icon;
         }
 
         @Override
-        protected void onPostExecute (Drawable drawable) {
+        protected void onPostExecute(Bitmap bitmap) {
             if (imageView != null) {
-                imageView.setImageDrawable(drawable);
+                imageView.setImageBitmap(bitmap);
             }
         }
     }
@@ -128,7 +121,8 @@ public abstract class BaseAppsBinder<T> extends ItemViewBinder<T, BaseAppsBinder
         public TextView summary;
         public TextView text2;
         public TextView status;
-        ViewHolder (View itemView) {
+
+        ViewHolder(View itemView) {
             super(itemView);
             icon = itemView.findViewById(android.R.id.icon);
             title = itemView.findViewById(android.R.id.title);

@@ -1,13 +1,22 @@
 package top.trumeet.mipushframework.event;
 
+import android.app.Dialog;
+import android.content.ClipboardManager;
+import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
+import android.support.v7.app.AlertDialog;
 import android.view.View;
-
-import com.xiaomi.xmsf.R;
 
 import java.util.Date;
 
+import top.trumeet.common.event.Event;
+import top.trumeet.common.event.type.EventType;
+import top.trumeet.common.event.type.TypeFactory;
+import top.trumeet.common.utils.Utils;
+import top.trumeet.mipush.R;
 import top.trumeet.mipushframework.permissions.ManagePermissionsActivity;
 import top.trumeet.mipushframework.utils.BaseAppsBinder;
 import top.trumeet.mipushframework.utils.ParseUtils;
@@ -21,30 +30,18 @@ import top.trumeet.mipushframework.utils.ParseUtils;
 
 public class EventItemBinder extends BaseAppsBinder<Event> {
 
-    private boolean clickEnabled = true;
-    EventItemBinder(boolean clickEnabled) {
+    private boolean isSpecificApp = true;
+    EventItemBinder(boolean isSpecificApp) {
         super();
-        this.clickEnabled = clickEnabled;
+        this.isSpecificApp = isSpecificApp;
     }
 
     @Override
     protected void onBindViewHolder(final @NonNull ViewHolder holder, final @NonNull Event item) {
-        fillData(item.getPkg(), holder);
-        String text;
-        switch (item.getType()) {
-            case Event.Type.REGISTER :
-                text = holder.itemView.getContext()
-                        .getString(R.string.event_register);
-                break;
-            case Event.Type.RECEIVE_PUSH:
-                text = holder.itemView.getContext()
-                        .getString(R.string.event_push);
-                break;
-            default:
-                text = null;
-                break;
-        }
-        holder.summary.setText(text);
+        fillData(item.getPkg(), false, holder);
+        final EventType type = TypeFactory.create(item, item.getPkg());
+        holder.title.setText(type.getTitle(holder.itemView.getContext()));
+        holder.summary.setText(type.getSummary(holder.itemView.getContext()));
 
         String status;
         switch (item.getResult()) {
@@ -66,21 +63,52 @@ public class EventItemBinder extends BaseAppsBinder<Event> {
         }
         holder.text2.setText(
                 ParseUtils.getFriendlyDateString(new Date(item.getDate()),
-                        EventDB.getUTC(), holder.itemView.getContext()));
+                        Utils.getUTC(), holder.itemView.getContext()));
         holder.status.setText(status);
 
-        if (clickEnabled) {
-            holder.itemView.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View view) {
-                    holder.itemView.getContext()
-                            .startActivity(new Intent(holder.itemView.getContext(),
-                                    ManagePermissionsActivity.class)
-                                    .putExtra(ManagePermissionsActivity.EXTRA_PACKAGE_NAME,
-                                            item.getPkg()));
+        holder.itemView.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                Dialog dialog = createInfoDialog(type,
+                        holder.itemView.getContext()); // "Developer info" dialog for event messages
+                if (dialog != null && isSpecificApp) {
+                    dialog.show();
+                } else {
+                    startManagePermissions(type, holder.itemView.getContext());
                 }
-            });
-        }
+            }
+        });
     }
 
+    @Nullable
+    private Dialog createInfoDialog (final EventType type, final Context context) {
+        final CharSequence info = type.getInfo(context);
+        if (info == null)
+            return null;
+        return new AlertDialog.Builder(context)
+                .setMessage(info)
+                .setNeutralButton(android.R.string.copy, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialogInterface, int i) {
+                        ClipboardManager clipboardManager = (ClipboardManager)
+                                context.getSystemService(Context.CLIPBOARD_SERVICE);
+                        clipboardManager.setText(info);
+                    }
+                })
+                .setNegativeButton(R.string.action_edit_permission, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialogInterface, int i) {
+                        startManagePermissions(type, context);
+                    }
+                })
+                .create();
+    }
+
+    private static void startManagePermissions (EventType type, Context context) {
+        // Issue: This currently allows overlapping opens.
+        context.startActivity(new Intent(context,
+                ManagePermissionsActivity.class)
+                .putExtra(ManagePermissionsActivity.EXTRA_PACKAGE_NAME,
+                        type.getPkg()));
+    }
 }

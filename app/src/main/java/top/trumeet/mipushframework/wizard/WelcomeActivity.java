@@ -10,8 +10,8 @@ import android.widget.TextView;
 
 import com.android.setupwizardlib.SetupWizardLayout;
 import com.android.setupwizardlib.view.NavigationBar;
-import com.xiaomi.xmsf.R;
 
+import top.trumeet.mipush.R;
 import top.trumeet.mipushframework.settings.MainActivity;
 
 /**
@@ -49,6 +49,6 @@ public class WelcomeActivity extends AppCompatActivity implements NavigationBar.
 
     @Override
     public void onNavigateNext() {
-        startActivity(new Intent(this, CheckRunningStatusActivity.class));
+        startActivity(new Intent(this, CheckRunInBackgroundActivity.class));
     }
 }

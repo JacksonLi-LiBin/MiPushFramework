@@ -2,22 +2,24 @@ package top.trumeet.mipushframework.event;
 
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.os.CancellationSignal;
 import android.support.annotation.Nullable;
 import android.support.v4.app.Fragment;
+import android.support.v4.widget.SwipeRefreshLayout;
 import android.support.v7.widget.DividerItemDecoration;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.List;
 
 import me.drakeet.multitype.Items;
 import me.drakeet.multitype.MultiTypeAdapter;
+import top.trumeet.common.db.EventDb;
+import top.trumeet.common.event.Event;
 import top.trumeet.mipushframework.utils.OnLoadMoreListener;
 
 /**
@@ -25,12 +27,12 @@ import top.trumeet.mipushframework.utils.OnLoadMoreListener;
  * @author Trumeet
  */
 
-public class EventFragment extends Fragment {
+public class EventFragment extends Fragment implements SwipeRefreshLayout.OnRefreshListener {
     private static final String EXTRA_TARGET_PACKAGE = EventFragment.class
             .getName() + ".EXTRA_TARGET_PACKAGE";
 
     private MultiTypeAdapter mAdapter;
-    private Logger logger = LoggerFactory.getLogger(EventFragment.class);
+    private static final String TAG = EventFragment.class.getSimpleName();
 
     /**
      * Already load page
@@ -53,9 +55,12 @@ public class EventFragment extends Fragment {
         super.onCreate(savedInstanceState);
         mTargetPackage = getArguments() == null ? null :
                 getArguments().getString(EXTRA_TARGET_PACKAGE);
+        boolean isSpecificApp = (mTargetPackage != null); // from "Recent Activity"
         mAdapter = new MultiTypeAdapter();
-        mAdapter.register(Event.class, new EventItemBinder(mTargetPackage == null));
+        mAdapter.register(Event.class, new EventItemBinder(isSpecificApp));
     }
+
+    SwipeRefreshLayout swipeRefreshLayout;
 
     @Nullable
     @Override
@@ -67,13 +72,17 @@ public class EventFragment extends Fragment {
         DividerItemDecoration dividerItemDecoration = new DividerItemDecoration(view.getContext(),
                 LinearLayoutManager.VERTICAL);
         view.addItemDecoration(dividerItemDecoration);
-        view.setOnScrollListener(new OnLoadMoreListener() {
+        view.addOnScrollListener(new OnLoadMoreListener() {
             @Override
             public void onLoadMore() {
                 loadPage();
             }
         });
-        return view;
+
+        swipeRefreshLayout = new SwipeRefreshLayout(getActivity());
+        swipeRefreshLayout.setOnRefreshListener(this);
+        swipeRefreshLayout.addView(view);
+        return swipeRefreshLayout;
     }
 
     @Override
@@ -83,9 +92,12 @@ public class EventFragment extends Fragment {
     }
 
     private void loadPage () {
-        logger.debug("loadPage");
-        if (mLoadTask != null && !mLoadTask.isCancelled())
-            return;
+        Log.d(TAG, "loadPage");
+        if (mLoadTask != null && !mLoadTask.isCancelled()) {
+            if (mLoadTask.getStatus() != AsyncTask.Status.FINISHED) {
+                return;
+            }
+        }
         mLoadTask = new LoadTask(mLoadPage + 1);
         mLoadTask.execute();
     }
@@ -99,8 +111,21 @@ public class EventFragment extends Fragment {
         super.onDetach();
     }
 
+    @Override
+    public void onRefresh() {
+        Log.d(TAG, "refreshPage");
+        if (mLoadTask != null && !mLoadTask.isCancelled()) {
+            if (mLoadTask.getStatus() != AsyncTask.Status.FINISHED) {
+                return;
+            }
+        }
+        mLoadTask = new LoadTask(1);
+        mLoadTask.execute();
+    }
+
     private class LoadTask extends AsyncTask<Integer, Void, List<Event>> {
         private int mTargetPage;
+        private CancellationSignal mSignal;
 
         LoadTask (int page) {
             mTargetPage = page;
@@ -108,18 +133,37 @@ public class EventFragment extends Fragment {
 
         @Override
         protected List<Event> doInBackground(Integer... integers) {
-            return EventDB.query(mTargetPackage, mTargetPage,
-                    getActivity());
+            mSignal = new CancellationSignal();
+            return EventDb.query(mTargetPackage, mTargetPage,
+                    getActivity(), mSignal);
         }
 
         @Override
         protected void onPostExecute (List<Event> list) {
+            if (mTargetPage == 1) {
+                mAdapter.notifyItemRangeRemoved(0, mAdapter.getItemCount());
+                mAdapter.getItems().clear();
+            }
+
             int start = mAdapter.getItemCount();
             Items items = new Items(mAdapter.getItems());
             items.addAll(list);
             mAdapter.setItems(items);
             mAdapter.notifyItemRangeInserted(start, list.size());
             mLoadPage = mTargetPage;
+
+            swipeRefreshLayout.setRefreshing(false);
+            mLoadTask = null;
+        }
+
+        @Override
+        protected void onCancelled () {
+            if (mSignal != null) {
+                if (!mSignal.isCanceled()) {
+                    mSignal.cancel();
+                }
+                mSignal = null;
+            }
         }
     }
 }
